@@ -2,7 +2,6 @@
 
 import { startTransition, useState } from "react";
 
-import AlertModal from "@/app/components/AlertModal";
 import AppShell from "@/app/components/AppShell";
 import BreathingWidget from "@/app/components/BreathingWidget";
 import Chat from "@/app/components/Chat";
@@ -16,7 +15,6 @@ import SafetyPlan, {
 import SosMenu, { type SosAction } from "@/app/components/SosMenu";
 import StreakCard from "@/app/components/StreakCard";
 import type { NavItemId } from "@/app/components/navItems";
-import type { Theme } from "@/app/components/ThemeToggle";
 
 type MoodEntry = {
   id: string;
@@ -85,7 +83,6 @@ export default function DashboardPage() {
   const [currentMood, setCurrentMood] = useState<MoodState>("Neutral");
   const [history, setHistory] = useState<MoodEntry[]>(starterHistory);
   const [streakDays, setStreakDays] = useState(3);
-  const [theme, setTheme] = useState<Theme>("light");
   const [trustedContactInput, setTrustedContactInput] = useState("");
   const [trustedContacts, setTrustedContacts] = useState<string[]>([]);
   const [trustedContactToRemove, setTrustedContactToRemove] = useState<
@@ -96,8 +93,8 @@ export default function DashboardPage() {
   const [breathingOpen, setBreathingOpen] = useState(false);
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
-  const [alertOpen, setAlertOpen] = useState(false);
   const [safetyValues, setSafetyValues] = useState<SafetyPlanFields>(emptySafetyPlan);
+  const [supportShortcutId, setSupportShortcutId] = useState(0);
 
   const moodCounts = moodOrder.reduce<Record<MoodState, number>>(
     (counts, mood) => {
@@ -161,12 +158,11 @@ export default function DashboardPage() {
     } else if (action === "resources") {
       setResourcesOpen(true);
     } else if (action === "counselor") {
-      setAlertOpen(true);
+      startTransition(() => {
+        setActiveTab("chat");
+      });
+      setSupportShortcutId((current) => current + 1);
     }
-  }
-
-  function handleAlertSelection() {
-    setAlertOpen(false);
   }
 
   function addTrustedContact(value: string) {
@@ -210,9 +206,12 @@ export default function DashboardPage() {
         {activeTab === "chat" ? (
           <Chat
             onMoodUpdate={handleMoodUpdate}
-            theme={theme}
-            onThemeChange={setTheme}
             onSosClick={() => setSosOpen(true)}
+            supportShortcut={
+              supportShortcutId
+                ? { id: supportShortcutId, type: "counselor" }
+                : null
+            }
           />
         ) : (
           <section className="grid gap-4 sm:grid-cols-2">
@@ -484,12 +483,6 @@ export default function DashboardPage() {
         onClose={() => setResourcesOpen(false)}
         trustedContacts={trustedContacts}
         onAddToTrustedList={addTrustedContact}
-      />
-
-      <AlertModal
-        open={alertOpen}
-        onSelect={handleAlertSelection}
-        onClose={() => setAlertOpen(false)}
       />
     </>
   );

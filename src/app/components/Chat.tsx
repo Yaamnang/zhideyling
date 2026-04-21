@@ -1,46 +1,34 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import AlertModal, { type AlertAction } from "@/app/components/AlertModal";
-import InputBox, { type InputBoxHandle } from "@/app/components/InputBox";
-import Message, {
-  moodStyles,
-  type ChatMessage,
-  type MoodState,
-} from "@/app/components/Message";
-import ThemeToggle, { type Theme } from "@/app/components/ThemeToggle";
+import InputBox, {
+  type ComposerMode,
+  type InputBoxHandle,
+} from "@/app/components/InputBox";
+import Message, { type ChatMessage, type MoodState } from "@/app/components/Message";
+
+type SupportShortcut = {
+  id: number;
+  type: ContactFlowType;
+};
+
+type ConversationItem = {
+  id: string;
+  title: string;
+  stamp: string;
+  preview: string;
+  messages: ChatMessage[];
+};
 
 type ChatProps = {
   onMoodUpdate: (mood: MoodState, note: string) => void;
-  theme: Theme;
-  onThemeChange: (t: Theme) => void;
   onSosClick: () => void;
+  supportShortcut?: SupportShortcut | null;
 };
 
-const moodButtons: MoodState[] = [
-  "Happy",
-  "Neutral",
-  "Sad",
-  "Stressed",
-  "Critical",
-];
-
-const shortcutPrompts: Record<MoodState, string> = {
-  Happy: "I feel happy and hopeful today.",
-  Neutral: "I feel okay and steady today.",
-  Sad: "I feel sad and low today.",
-  Stressed: "I feel stressed, tired, and overwhelmed today.",
-  Critical: "I feel unsafe and need immediate support.",
-};
-
-const moodSummaries: Record<MoodState, string> = {
-  Happy: "Momentum feels positive. Responses lean into reflection and what is helping.",
-  Neutral: "Things feel steady. The check-in stays simple and grounding.",
-  Sad: "The tone sounds heavier. Responses slow down and offer gentle, manageable steps.",
-  Stressed: "Pressure is rising. Responses shift into decompression and prioritization mode.",
-  Critical: "Urgent support may be needed. Extra help options are now available.",
-};
+type ContactFlowType = Exclude<AlertAction, "continue">;
 
 const keywordGroups: Record<MoodState, string[]> = {
   Happy: ["happy", "good", "great", "hopeful", "calm", "grateful", "excited"],
@@ -79,6 +67,15 @@ const keywordGroups: Record<MoodState, string[]> = {
   ],
 };
 
+const killVentPatterns = [
+  /\bwanna kill\b/,
+  /\bwant to kill\b/,
+  /\bgoing to kill\b/,
+  /\bgonna kill\b/,
+  /\bi('ll| will) kill\b/,
+  /\bcould kill\b/,
+];
+
 function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -98,20 +95,11 @@ function buildMessage(
   return { id: createId(), role, text, mood, timestamp: createTimestamp() };
 }
 
-const killVentPatterns = [
-  /\bwanna kill\b/,
-  /\bwant to kill\b/,
-  /\bgoing to kill\b/,
-  /\bgonna kill\b/,
-  /\bi('ll| will) kill\b/,
-  /\bcould kill\b/,
-];
-
-// Returns true when venting anger at someone else (not self-harm)
 function isKillVent(text: string) {
   const normalized = text.toLowerCase();
-  // Exclude self-directed phrases already caught by critical keywords
-  if (/kill (my)?self|kill me\b/.test(normalized)) return false;
+  if (/kill (my)?self|kill me\b/.test(normalized)) {
+    return false;
+  }
   return killVentPatterns.some((re) => re.test(normalized));
 }
 
@@ -154,18 +142,106 @@ function buildAssistantReply(mood: MoodState) {
   }
 }
 
+const contactOptions: Record<ContactFlowType, string[]> = {
+  counselor: ["Counselor 1", "Counselor 2", "Counselor 3", "None"],
+  "trusted-adult": [
+    "Trusted adult 1",
+    "Trusted adult 2",
+    "Trusted adult 3",
+    "None",
+  ],
+};
+
+const welcomeText =
+  "Welcome to Zhideyling AI. Try a daily check-in button or type how you're feeling, and I'll respond in a tone that matches the mood.";
+
 const initialMessages: ChatMessage[] = [
-  buildMessage(
-    "assistant",
-    "Welcome to Zhideyling AI. Try a daily check-in button or type how you're feeling, and I'll respond in a tone that matches the mood.",
-    "Neutral"
-  ),
+  {
+    id: "welcome-message",
+    role: "assistant",
+    text: welcomeText,
+    mood: "Neutral",
+    timestamp: "Now",
+  },
+];
+
+function createFreshConversationItem(id = `fresh-${createId()}`): ConversationItem {
+  return {
+    id,
+    title: "New chat",
+    stamp: "Now",
+    preview: welcomeText,
+    messages: [
+      {
+        id: `welcome-${createId()}`,
+        role: "assistant",
+        text: welcomeText,
+        mood: "Neutral",
+        timestamp: "Now",
+      },
+    ],
+  };
+}
+
+const demoConversations: ConversationItem[] = [
+  createFreshConversationItem("fresh-start"),
+  {
+    id: "demo-morning-check-in",
+    title: "Morning check-in",
+    stamp: "Today",
+    preview: "Let's break the pressure into one task, one pause, and one person that can help.",
+    messages: [
+      {
+        id: "demo-morning-1",
+        role: "assistant",
+        text: "Welcome back. How has the morning been feeling so far?",
+        mood: "Neutral",
+        timestamp: "9:02 AM",
+      },
+      {
+        id: "demo-morning-2",
+        role: "user",
+        text: "I've been overwhelmed by school and deadlines.",
+        mood: "Stressed",
+        timestamp: "9:03 AM",
+      },
+      {
+        id: "demo-morning-3",
+        role: "assistant",
+        text: "That sounds like a lot at the same time. Let's break the pressure into one task, one pause, and one person that can help.",
+        mood: "Stressed",
+        timestamp: "9:04 AM",
+      },
+    ],
+  },
+  {
+    id: "demo-evening-reset",
+    title: "Evening reset",
+    stamp: "Yesterday",
+    preview: "You said a short walk and softer music helped calm things down.",
+    messages: [
+      {
+        id: "demo-evening-1",
+        role: "user",
+        text: "I feel a little better than earlier, just tired now.",
+        mood: "Sad",
+        timestamp: "8:18 PM",
+      },
+      {
+        id: "demo-evening-2",
+        role: "assistant",
+        text: "You said a short walk and softer music helped calm things down. Want to keep tonight that gentle?",
+        mood: "Neutral",
+        timestamp: "8:19 PM",
+      },
+    ],
+  },
 ];
 
 function TypingIndicator() {
   return (
-    <div className="flex justify-start">
-      <div className="flex items-center gap-1.5 rounded-[24px] border border-quiet bg-white px-5 py-4 shadow-sm dark:bg-panel-dark">
+    <div className="flex w-full justify-start">
+      <div className="flex items-center gap-1.5 rounded-[22px] border border-quiet bg-white/80 px-4 py-3 shadow-[0_10px_22px_rgba(15,23,42,0.06)] dark:bg-panel-dark/80 dark:shadow-[0_12px_26px_rgba(0,0,0,0.22)]">
         {[0, 150, 300].map((delay) => (
           <span
             key={delay}
@@ -178,62 +254,274 @@ function TypingIndicator() {
   );
 }
 
-export default function Chat({ onMoodUpdate, theme, onThemeChange, onSosClick }: ChatProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+export default function Chat({
+  onMoodUpdate,
+  onSosClick,
+  supportShortcut = null,
+}: ChatProps) {
+  const [isConversationRailOpen, setIsConversationRailOpen] = useState(false);
+  const [conversations, setConversations] =
+    useState<ConversationItem[]>(demoConversations);
+  const [selectedConversationId, setSelectedConversationId] = useState(
+    "fresh-start"
+  );
   const [input, setInput] = useState("");
-  const [currentMood, setCurrentMood] = useState<MoodState>("Neutral");
+  const [currentMood, setCurrentMood] = useState<MoodState>(
+    demoConversations.find((conversation) => conversation.id === "fresh-start")?.messages.at(-1)?.mood ??
+      "Neutral"
+  );
   const [isTyping, setIsTyping] = useState(false);
   const [isAlertOpen, setIsAlertOpen] = useState(false);
-  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const [composerMode, setComposerMode] = useState<ComposerMode>("text");
+  const [contactFlowType, setContactFlowType] = useState<ContactFlowType | null>(null);
+  const [selectedContact, setSelectedContact] = useState("");
+  const conversationEndRef = useRef<HTMLDivElement | null>(null);
+  const composerShellRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<InputBoxHandle | null>(null);
+  const contactTimeoutRef = useRef<number | null>(null);
+  const handledShortcutIdRef = useRef(0);
+  const scheduledTimeoutsRef = useRef<number[]>([]);
+
+  const activeConversation =
+    conversations.find((conversation) => conversation.id === selectedConversationId) ??
+    conversations[0];
+  const messages = activeConversation?.messages ?? initialMessages;
+
+  const handleSupportShortcut = useEffectEvent((shortcut: SupportShortcut) => {
+    if (handledShortcutIdRef.current === shortcut.id) {
+      return;
+    }
+
+    handledShortcutIdRef.current = shortcut.id;
+    startContactFlow(shortcut.type);
+  });
 
   useEffect(() => {
-    const el = messagesRef.current;
-    if (!el) return;
-    // Only auto-scroll when content overflows (i.e. after first few messages)
-    if (el.scrollHeight > el.clientHeight) {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    scrollToLatest(messages.length > 1 || isTyping ? "smooth" : "auto");
+  }, [messages, isTyping, composerMode]);
+
+  useEffect(() => {
+    return () => {
+      clearPendingWork();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supportShortcut) {
+      return;
     }
-  }, [messages, isTyping]);
+
+    handleSupportShortcut(supportShortcut);
+  }, [supportShortcut]);
 
   function commitMood(mood: MoodState, note: string) {
     setCurrentMood(mood);
     onMoodUpdate(mood, note);
   }
 
-  function sendMessage(rawText: string) {
-    const text = rawText.trim();
-    if (!text) return;
+  function buildPreview(text: string) {
+    const trimmed = text.trim();
+    return trimmed.length > 72 ? `${trimmed.slice(0, 72)}...` : trimmed;
+  }
 
-    // Easter egg — venting anger at someone else
+  function focusComposer() {
+    window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 60);
+  }
+
+  function scheduleTimeout(callback: () => void, delay: number) {
+    const timeoutId = window.setTimeout(() => {
+      scheduledTimeoutsRef.current = scheduledTimeoutsRef.current.filter(
+        (activeId) => activeId !== timeoutId
+      );
+      callback();
+    }, delay);
+
+    scheduledTimeoutsRef.current.push(timeoutId);
+    return timeoutId;
+  }
+
+  function clearPendingWork() {
+    scheduledTimeoutsRef.current.forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    scheduledTimeoutsRef.current = [];
+
+    if (contactTimeoutRef.current) {
+      window.clearTimeout(contactTimeoutRef.current);
+      contactTimeoutRef.current = null;
+    }
+  }
+
+  function scrollToLatest(behavior: ScrollBehavior) {
+    const end = conversationEndRef.current;
+    if (!end) {
+      return;
+    }
+
+    const composerHeight = composerShellRef.current?.offsetHeight ?? 0;
+    end.style.scrollMarginBottom = `${composerHeight + 20}px`;
+
+    window.requestAnimationFrame(() => {
+      end.scrollIntoView({ block: "end", behavior });
+    });
+  }
+
+  function updateConversationMessages(
+    conversationId: string,
+    updater: (currentMessages: ChatMessage[]) => ChatMessage[]
+  ) {
+    setConversations((currentConversations) =>
+      currentConversations.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        const nextMessages = updater(conversation.messages);
+        const lastMessage = nextMessages.at(-1);
+
+        return {
+          ...conversation,
+          messages: nextMessages,
+          preview: lastMessage
+            ? buildPreview(lastMessage.text)
+            : conversation.preview,
+        };
+      })
+    );
+  }
+
+  function resetContactFlow(shouldFocus = false) {
+    if (contactTimeoutRef.current) {
+      window.clearTimeout(contactTimeoutRef.current);
+      contactTimeoutRef.current = null;
+    }
+
+    setComposerMode("text");
+    setContactFlowType(null);
+    setSelectedContact("");
+
+    if (shouldFocus) {
+      focusComposer();
+    }
+  }
+
+  function startContactFlow(type: ContactFlowType, conversationId = selectedConversationId) {
+    setIsTyping(false);
+    setInput("");
+    updateConversationMessages(conversationId, (currentMessages) => [
+      ...currentMessages,
+      buildMessage("assistant", "Shall I contact them?", "Neutral"),
+    ]);
+    setContactFlowType(type);
+    setSelectedContact("");
+    setComposerMode("contact-choice");
+  }
+
+  function handleConversationSelect(conversationId: string) {
+    if (conversationId === selectedConversationId) {
+      if (window.matchMedia("(max-width: 1023px)").matches) {
+        setIsConversationRailOpen(false);
+      }
+      return;
+    }
+
+    clearPendingWork();
+    setSelectedConversationId(conversationId);
+    setInput("");
+    setIsTyping(false);
+    setIsAlertOpen(false);
+    setComposerMode("text");
+    setContactFlowType(null);
+    setSelectedContact("");
+
+    const nextConversation = conversations.find(
+      (conversation) => conversation.id === conversationId
+    );
+    setCurrentMood(nextConversation?.messages.at(-1)?.mood ?? "Neutral");
+
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      setIsConversationRailOpen(false);
+    }
+
+    window.requestAnimationFrame(() => {
+      scrollToLatest("auto");
+      focusComposer();
+    });
+  }
+
+  function handleNewChat() {
+    clearPendingWork();
+
+    const freshConversation = createFreshConversationItem();
+
+    setConversations((currentConversations) => [
+      freshConversation,
+      ...currentConversations,
+    ]);
+    setSelectedConversationId(freshConversation.id);
+    setInput("");
+    setCurrentMood("Neutral");
+    setIsTyping(false);
+    setIsAlertOpen(false);
+    setComposerMode("text");
+    setContactFlowType(null);
+    setSelectedContact("");
+
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      setIsConversationRailOpen(false);
+    }
+
+    window.requestAnimationFrame(() => {
+      scrollToLatest("auto");
+      focusComposer();
+    });
+  }
+
+  function sendMessage(rawText: string) {
+    if (composerMode !== "text") {
+      return;
+    }
+
+    const text = rawText.trim();
+    if (!text) {
+      return;
+    }
+
+    const targetConversationId = selectedConversationId;
+
     if (isKillVent(text)) {
-      setMessages((prev) => [...prev, buildMessage("user", text, "Stressed")]);
+      updateConversationMessages(targetConversationId, (currentMessages) => [
+        ...currentMessages,
+        buildMessage("user", text, "Stressed"),
+      ]);
       setInput("");
       commitMood("Stressed", text);
 
       setIsTyping(true);
-      // Phase 1: show "hmm…"
-      window.setTimeout(() => {
+      scheduleTimeout(() => {
         setIsTyping(false);
-        setMessages((prev) => [...prev, buildMessage("assistant", "hmm…", "Neutral")]);
+        updateConversationMessages(targetConversationId, (currentMessages) => [
+          ...currentMessages,
+          buildMessage("assistant", "hmm...", "Neutral"),
+        ]);
 
-        // Phase 2: second typing dot, then play audio + final reply
-        window.setTimeout(() => {
+        scheduleTimeout(() => {
           setIsTyping(true);
-          window.setTimeout(() => {
+          scheduleTimeout(() => {
             setIsTyping(false);
-            // Start audio and show message simultaneously, then reply after 2s
             try {
               new Audio("/dho.mp3").play();
             } catch {
-              // autoplay blocked — silently ignore
+              // autoplay blocked
             }
-            window.setTimeout(() => {
-              setMessages((prev) => [
-                ...prev,
-                buildMessage("assistant", "perhaps this cleansed ur mind 😌", "Happy"),
+            scheduleTimeout(() => {
+              updateConversationMessages(targetConversationId, (currentMessages) => [
+                ...currentMessages,
+                buildMessage("assistant", "perhaps this cleansed ur mind :)", "Happy"),
               ]);
-              inputRef.current?.focus();
+              focusComposer();
             }, 2000);
           }, 1200);
         }, 600);
@@ -244,21 +532,24 @@ export default function Chat({ onMoodUpdate, theme, onThemeChange, onSosClick }:
 
     const analysis = analyzeMood(text);
 
-    setMessages((prev) => [...prev, buildMessage("user", text, analysis.mood)]);
+    updateConversationMessages(targetConversationId, (currentMessages) => [
+      ...currentMessages,
+      buildMessage("user", text, analysis.mood),
+    ]);
     setInput("");
     commitMood(analysis.mood, text);
 
     setIsTyping(true);
-    window.setTimeout(() => {
+    scheduleTimeout(() => {
       setIsTyping(false);
-      setMessages((prev) => [
-        ...prev,
+      updateConversationMessages(targetConversationId, (currentMessages) => [
+        ...currentMessages,
         buildMessage("assistant", buildAssistantReply(analysis.mood), analysis.mood),
       ]);
       if (analysis.needsAlert) {
         setIsAlertOpen(true);
       } else {
-        inputRef.current?.focus();
+        focusComposer();
       }
     }, 1400);
   }
@@ -266,78 +557,272 @@ export default function Chat({ onMoodUpdate, theme, onThemeChange, onSosClick }:
   function handleAlertSelection(action: AlertAction) {
     setIsAlertOpen(false);
 
-    const followUp =
-      action === "counselor"
-        ? "Let's prioritize a counselor or trained support person next. In a real product this would open an immediate support handoff."
-        : action === "trusted-adult"
-          ? "Reaching a trusted adult is a strong next move. Keep the message simple: you need support and don't want to handle this alone."
-          : "We can keep talking here. If the situation feels more urgent, please reach out to a nearby person or local emergency support right away.";
+    if (action === "continue") {
+      updateConversationMessages(selectedConversationId, (currentMessages) => [
+        ...currentMessages,
+        buildMessage(
+          "assistant",
+          "We can keep talking here. If the situation feels more urgent, please reach out to a nearby person or local emergency support right away.",
+          "Critical"
+        ),
+      ]);
+      focusComposer();
+      return;
+    }
 
-    setMessages((prev) => [...prev, buildMessage("assistant", followUp, "Critical")]);
+    startContactFlow(action);
   }
 
-  const moodStyle = moodStyles[currentMood];
+  function handleContactSubmit() {
+    if (composerMode !== "contact-choice" || !contactFlowType || !selectedContact) {
+      return;
+    }
+
+    if (selectedContact === "None") {
+      updateConversationMessages(selectedConversationId, (currentMessages) => [
+        ...currentMessages,
+        buildMessage("assistant", "Okay.", "Neutral"),
+      ]);
+      resetContactFlow(true);
+      return;
+    }
+
+    const chosenContact = selectedContact;
+    const targetConversationId = selectedConversationId;
+
+    setComposerMode("contacting");
+    contactTimeoutRef.current = scheduleTimeout(() => {
+      updateConversationMessages(targetConversationId, (currentMessages) => [
+        ...currentMessages,
+        buildMessage("assistant", `I have contacted ${chosenContact}.`, "Neutral"),
+      ]);
+      contactTimeoutRef.current = null;
+      resetContactFlow(true);
+    }, 1800);
+  }
+
+  const activeContactChoices = contactFlowType ? contactOptions[contactFlowType] : [];
+  const contactingLabel =
+    contactFlowType && selectedContact && selectedContact !== "None"
+      ? `Contacting ${selectedContact}...`
+      : "Contacting support...";
+  const isFreshChat =
+    messages.length === 1 &&
+    messages[0]?.role === "assistant" &&
+    messages[0]?.text === welcomeText &&
+    !isTyping &&
+    composerMode === "text";
+  const conversationRail = (
+    <>
+      <div className="flex items-center gap-3 px-1">
+        <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+          </svg>
+        </span>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-quiet">
+            Past Conversation
+          </p>
+          <p className="mt-1 text-sm text-quiet">
+            Demo chats ready to open
+          </p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleNewChat}
+        className="mt-5 flex w-full items-center justify-center gap-2 rounded-[20px] bg-primary px-4 py-3 text-sm font-semibold text-white transition hover:bg-text"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className="h-4 w-4"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.3}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M12 5v14" />
+          <path d="M5 12h14" />
+        </svg>
+        New chat
+      </button>
+
+      <div className="mt-4 flex-1 overflow-y-auto pr-1">
+        <div className="space-y-3">
+          {conversations.map((conversation) => {
+            const isActive = conversation.id === selectedConversationId;
+
+            return (
+              <button
+                key={conversation.id}
+                type="button"
+                onClick={() => handleConversationSelect(conversation.id)}
+                aria-current={isActive ? "page" : undefined}
+                className={`w-full rounded-[22px] border px-4 py-4 text-left transition ${
+                  isActive
+                    ? "border-primary/25 bg-primary/10 shadow-[0_12px_28px_rgba(79,124,172,0.14)]"
+                    : "border-primary/10 bg-white/78 hover:border-primary/20 hover:bg-white dark:border-white/8 dark:bg-white/5 dark:hover:bg-white/8"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-body">
+                    {conversation.title}
+                  </p>
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-quiet">
+                    {conversation.stamp}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-quiet">
+                  {conversation.preview}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
 
   return (
-    <section className="flex flex-1 flex-col gap-4">
-      <div className={`flex min-h-0 flex-1 flex-col gap-4 transition-[filter] duration-300 ${isAlertOpen ? "blur-[2px] pointer-events-none select-none" : ""}`}>
-
-        {/* Conversation panel — fills remaining height */}
-        <div className="panel-card flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-quiet px-5 py-4 sm:px-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-quiet">
-                Conversation
-              </p>
-              <h2 className="mt-1 text-xl font-semibold tracking-tight text-body">
-                Zhideyling AI
-              </h2>
-            </div>
-            <span className={`mood-pill transition-all duration-500 ${moodStyle.badge}`}>
-              <span className={`h-2.5 w-2.5 rounded-full transition-colors duration-500 ${moodStyle.dot}`} />
-              {currentMood}
-            </span>
-          </div>
-
-          <div
-            ref={messagesRef}
-            className="min-h-0 flex-1 overflow-y-auto bg-soft/40 px-4 py-5 dark:bg-surface-dark/40 sm:px-6"
+    <section
+      className={`flex min-h-[calc(100dvh-8rem)] flex-1 flex-col ${
+        isConversationRailOpen
+          ? "lg:grid lg:min-h-[calc(100vh-3.5rem)] lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-5"
+          : "lg:min-h-[calc(100vh-3.5rem)]"
+      }`}
+    >
+      {isConversationRailOpen ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close past conversations"
+            onClick={() => setIsConversationRailOpen(false)}
+            className="fixed inset-0 z-30 bg-text/22 backdrop-blur-[2px] lg:hidden"
+          />
+          <aside
+            id="past-conversation-rail"
+            className="fixed inset-x-4 top-24 bottom-6 z-40 flex flex-col overflow-hidden rounded-[28px] border border-primary/10 bg-white/90 p-4 shadow-[0_24px_50px_rgba(15,23,42,0.18)] backdrop-blur-xl dark:border-white/10 dark:bg-panel-dark/82 dark:shadow-[0_24px_50px_rgba(0,0,0,0.45)] lg:sticky lg:inset-auto lg:top-6 lg:bottom-auto lg:z-auto lg:h-[calc(100vh-3rem)] lg:border lg:border-primary/10 lg:bg-white/82 lg:shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:lg:border-white/10 dark:lg:bg-panel-dark/76 dark:lg:shadow-[0_18px_40px_rgba(0,0,0,0.35)]"
           >
-            <div className="flex min-h-full flex-col justify-end gap-4">
-              {messages.map((message) => (
-                <Message key={message.id} message={message} />
-              ))}
-              {isTyping && <TypingIndicator />}
-            </div>
-          </div>
+            {conversationRail}
+          </aside>
+        </>
+      ) : null}
 
-          {/* Composer */}
-          <div className="border-t border-quiet bg-primary/5 px-3 pb-3 pt-2 dark:bg-white/5 sm:px-4">
-            <div className="mb-2 flex items-center justify-end gap-2">
-              <ThemeToggle theme={theme} onChange={onThemeChange} />
+      <div
+        className={`flex min-h-full flex-1 flex-col transition-[filter] duration-300 ${isAlertOpen ? "pointer-events-none select-none blur-[2px]" : ""}`}
+      >
+        <div className="sticky top-4 z-20 px-1 pb-3 pt-1 lg:top-0 lg:pb-3 lg:pt-0">
+          <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-3 rounded-[24px] border border-white/65 bg-white/78 px-3 py-2 shadow-[0_16px_36px_rgba(15,23,42,0.1)] backdrop-blur-xl dark:border-white/10 dark:bg-panel-dark/74 dark:shadow-[0_18px_40px_rgba(0,0,0,0.35)]">
+            <div className="flex min-w-0 items-center gap-2.5">
               <button
                 type="button"
-                onClick={onSosClick}
-                className="inline-flex items-center gap-1.5 rounded-full bg-critical px-3 py-1.5 text-xs font-semibold text-white shadow-[0_6px_16px_rgba(185,28,28,0.35)] transition hover:brightness-110"
+                onClick={() => setIsConversationRailOpen((current) => !current)}
+                aria-expanded={isConversationRailOpen}
+                aria-controls="past-conversation-rail"
+                aria-label="Open past conversations"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary transition hover:bg-primary/16"
               >
-                <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 3 2 21h20Z" /><path d="M12 10v4" /><path d="M12 18h.01" />
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
                 </svg>
-                SOS
               </button>
+              <div className="min-w-0">
+                <p className="truncate text-base font-semibold tracking-tight text-body sm:text-xl">
+                  Past Conversation
+                </p>
+                <p className="truncate text-xs text-quiet">
+                  {activeConversation?.title ?? "Demo chat"}
+                </p>
+              </div>
             </div>
-            <InputBox
-              ref={inputRef}
-              value={input}
-              onChange={setInput}
-              onSubmit={() => sendMessage(input)}
-              currentMood={currentMood}
-              disabled={isTyping}
-            />
+            <button
+              type="button"
+              onClick={onSosClick}
+              className="inline-flex items-center gap-1.5 rounded-full bg-critical px-3 py-1.5 text-xs font-semibold text-white shadow-[0_6px_16px_rgba(185,28,28,0.35)] transition hover:brightness-110"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 3 2 21h20Z" />
+                <path d="M12 10v4" />
+                <path d="M12 18h.01" />
+              </svg>
+              SOS
+            </button>
           </div>
         </div>
 
+        <div className="flex-1 px-1">
+          <div
+            className={`mx-auto flex w-full max-w-3xl flex-col gap-4 pt-1 ${
+              isFreshChat
+                ? "min-h-full justify-end pb-14 sm:pb-16"
+                : "pb-24 sm:pb-28"
+            }`}
+          >
+            {messages.map((message) => (
+              <Message key={message.id} message={message} />
+            ))}
+            {isTyping && <TypingIndicator />}
+            <div ref={conversationEndRef} />
+          </div>
+        </div>
+
+        <div
+          ref={composerShellRef}
+          className="sticky bottom-0 z-20 mt-auto border-t border-primary/10 bg-white/92 px-0 pb-1 pt-2 backdrop-blur-sm dark:border-white/5 dark:bg-panel-dark/82"
+        >
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+            <InputBox
+              ref={inputRef}
+              mood={currentMood}
+              value={input}
+              onChange={setInput}
+              onSubmit={
+                composerMode === "text"
+                  ? () => sendMessage(input)
+                  : () => handleContactSubmit()
+              }
+              disabled={isTyping || composerMode === "contacting"}
+              mode={composerMode}
+              choices={activeContactChoices}
+              selectedChoice={selectedContact}
+              onChoiceSelect={setSelectedContact}
+              contactingLabel={contactingLabel}
+            />
+            <p className="hidden px-2 text-center text-xs text-quiet sm:block">
+              Zhideyling AI can make mistakes. If a situation feels urgent, use
+              SOS or reach out to local support now.
+            </p>
+          </div>
+        </div>
       </div>
+
       <AlertModal
         open={isAlertOpen}
         onSelect={handleAlertSelection}

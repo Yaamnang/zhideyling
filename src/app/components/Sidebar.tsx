@@ -17,7 +17,7 @@ export default function Sidebar({
   onTabChange,
 }: SidebarProps) {
   return (
-    <aside className="hidden border-r border-quiet px-5 py-6 lg:flex lg:flex-col lg:gap-6">
+    <aside className="hidden border-r border-quiet px-5 py-6 lg:sticky lg:top-0 lg:flex lg:h-screen lg:self-start lg:flex-col lg:gap-6 lg:overflow-y-auto">
       <div className="flex items-center gap-3">
         <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-[0_6px_14px_rgba(79,124,172,0.2)] dark:bg-white/90">
           <img src="/logo.png" alt="Zhideyling AI" className="h-full w-full object-contain p-1" />

@@ -45,15 +45,14 @@ type MessageProps = {
 
 export default function Message({ message }: MessageProps) {
   const isUser = message.role === "user";
-  const moodStyle = moodStyles[message.mood];
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+    <div className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
       <article
-        className={`max-w-[88%] rounded-[24px] border px-4 py-4 shadow-sm sm:max-w-[80%] ${
+        className={`max-w-[88%] rounded-[22px] px-4 py-3.5 sm:max-w-[78%] ${
           isUser
-            ? "border-transparent bg-primary text-white"
-            : `${moodStyle.border} bg-white text-text dark:bg-panel-dark dark:text-text-dark`
+            ? "bg-primary text-white shadow-[0_14px_28px_rgba(79,124,172,0.24)]"
+            : "border border-primary/10 bg-white text-text shadow-[0_10px_22px_rgba(15,23,42,0.06)] dark:bg-panel-dark/90 dark:text-text-dark dark:shadow-[0_12px_26px_rgba(0,0,0,0.22)]"
         }`}
       >
         <div className="flex items-center justify-between gap-3">
@@ -64,16 +63,16 @@ export default function Message({ message }: MessageProps) {
           >
             {isUser ? "You" : "Zhideyling AI"}
           </p>
-          {isUser && (
+          {isUser ? (
             <span className="inline-flex items-center gap-2 rounded-full bg-white/20 px-2.5 py-1 text-xs font-semibold text-white">
               <span className="h-2 w-2 rounded-full bg-white" />
               {message.mood}
             </span>
-          )}
+          ) : null}
         </div>
-        <p className="mt-3 text-sm leading-7 sm:text-[15px]">{message.text}</p>
+        <p className="mt-2.5 text-sm leading-7 sm:text-[15px]">{message.text}</p>
         <p
-          className={`mt-3 text-xs ${
+          className={`mt-2.5 text-xs ${
             isUser ? "text-white/70" : "text-muted dark:text-muted-dark"
           }`}
         >
