@@ -1,11 +1,29 @@
 export type MoodState = "Happy" | "Neutral" | "Sad" | "Stressed" | "Critical";
 
+export type ChatCardData =
+  | { kind: "sad-offer"; resolved?: string }
+  | { kind: "game-pick"; resolved?: string }
+  | { kind: "exercise-pick"; resolved?: string }
+  | {
+      kind: "emoji-guess";
+      emojis: string;
+      choices: string[];
+      correctIndex: number;
+      userIndex?: number;
+    }
+  | {
+      kind: "wyr";
+      prompt: { a: string; b: string };
+      userPick?: "a" | "b";
+    };
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
   mood: MoodState;
   timestamp: string;
+  card?: ChatCardData;
 };
 
 export const moodStyles: Record<

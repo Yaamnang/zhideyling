@@ -207,6 +207,7 @@ export default function DashboardPage() {
           <Chat
             onMoodUpdate={handleMoodUpdate}
             onSosClick={() => setSosOpen(true)}
+            onOpenBreathing={() => setBreathingOpen(true)}
             supportShortcut={
               supportShortcutId
                 ? { id: supportShortcutId, type: "counselor" }

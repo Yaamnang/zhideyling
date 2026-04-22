@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 
 type BreathingWidgetProps = {
   open: boolean;
@@ -12,12 +12,13 @@ type Phase = {
   label: string;
   seconds: number;
   scale: number;
+  tint: string;
 };
 
 const phases: Phase[] = [
-  { id: "inhale", label: "Breathe in", seconds: 4, scale: 1 },
-  { id: "hold", label: "Hold", seconds: 7, scale: 1 },
-  { id: "exhale", label: "Breathe out", seconds: 8, scale: 0.55 },
+  { id: "inhale", label: "Breathe in", seconds: 4, scale: 1, tint: "rgb(79, 124, 172)" },
+  { id: "hold", label: "Hold", seconds: 7, scale: 1, tint: "rgb(122, 168, 116)" },
+  { id: "exhale", label: "Breathe out", seconds: 8, scale: 0.2, tint: "rgb(79, 124, 172)" },
 ];
 
 type BreathingState = {
@@ -58,10 +59,16 @@ export default function BreathingWidget({ open, onClose }: BreathingWidgetProps)
 
 function BreathingOverlay({ onClose }: { onClose: () => void }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [primed, setPrimed] = useState(false);
 
   useEffect(() => {
     const id = window.setInterval(() => dispatch("tick"), 1000);
     return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setPrimed(true));
+    return () => cancelAnimationFrame(id);
   }, []);
 
   useEffect(() => {
@@ -75,6 +82,8 @@ function BreathingOverlay({ onClose }: { onClose: () => void }) {
   }, [onClose]);
 
   const phase = phases[state.phaseIndex];
+  const visibleScale = primed ? phase.scale : 0.2;
+  const visibleTint = primed ? phase.tint : phases[2].tint;
 
   return (
     <div
@@ -98,10 +107,13 @@ function BreathingOverlay({ onClose }: { onClose: () => void }) {
         <div className="relative mx-auto mt-8 flex h-60 w-60 items-center justify-center">
           <span className="absolute inset-0 rounded-full bg-accent/10" />
           <span
-            className="flex h-full w-full items-center justify-center rounded-full bg-gradient-to-br from-accent/70 to-primary/70 text-base font-semibold text-white transition-transform ease-in-out"
+            className="flex h-full w-full items-center justify-center rounded-full text-base font-semibold text-white"
             style={{
-              transform: `scale(${phase.scale})`,
+              transform: `scale(${visibleScale})`,
+              backgroundColor: visibleTint,
+              transitionProperty: "transform, background-color",
               transitionDuration: `${phase.seconds * 1000}ms`,
+              transitionTimingFunction: "ease-in-out",
             }}
           >
             {phase.label}

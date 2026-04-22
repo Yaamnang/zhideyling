@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import AlertModal, { type AlertAction } from "@/app/components/AlertModal";
+import ChatCard, { type CardAction } from "@/app/components/ChatCard";
 import InputBox, {
   type ComposerMode,
   type InputBoxHandle,
 } from "@/app/components/InputBox";
-import Message, { type ChatMessage, type MoodState } from "@/app/components/Message";
+import Message, {
+  type ChatCardData,
+  type ChatMessage,
+  type MoodState,
+} from "@/app/components/Message";
 
 type SupportShortcut = {
   id: number;
@@ -25,8 +30,55 @@ type ConversationItem = {
 type ChatProps = {
   onMoodUpdate: (mood: MoodState, note: string) => void;
   onSosClick: () => void;
+  onOpenBreathing: () => void;
   supportShortcut?: SupportShortcut | null;
 };
+
+const wyrPrompts: { a: string; b: string }[] = [
+  { a: "Always have to sing instead of speak", b: "Always have to dance while walking" },
+  { a: "Have unlimited momos for life", b: "Have unlimited pizza for life" },
+  { a: "Live next to a quiet mountain", b: "Live next to a lively town square" },
+  { a: "Know every language but only whisper", b: "Be fluent in one and sing everything" },
+  { a: "Always know what song is playing around you", b: "Always know the exact time without checking" },
+];
+
+const emojiPuzzles: { emojis: string; answer: string; distractors: string[] }[] = [
+  { emojis: "🦁 👑", answer: "The Lion King", distractors: ["Madagascar", "Kung Fu Panda", "Zootopia"] },
+  { emojis: "🕷️ 🕸️", answer: "Spider-Man", distractors: ["Ant-Man", "Iron Man", "Thor"] },
+  { emojis: "❄️ 👸", answer: "Frozen", distractors: ["Tangled", "Brave", "Moana"] },
+  { emojis: "🐟 🔍", answer: "Finding Nemo", distractors: ["Shark Tale", "Luca", "Soul"] },
+  { emojis: "🧙 💍", answer: "Lord of the Rings", distractors: ["Harry Potter", "Narnia", "The Hobbit"] },
+  { emojis: "🍕 🐢", answer: "Ninja Turtles", distractors: ["Kung Fu Panda", "Madagascar", "Cars"] },
+];
+
+function makeEmojiGuessCard(): ChatCardData {
+  const puzzle = emojiPuzzles[Math.floor(Math.random() * emojiPuzzles.length)];
+  const choices = [puzzle.answer, ...puzzle.distractors];
+  for (let i = choices.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [choices[i], choices[j]] = [choices[j], choices[i]];
+  }
+  return {
+    kind: "emoji-guess",
+    emojis: puzzle.emojis,
+    choices,
+    correctIndex: choices.indexOf(puzzle.answer),
+  };
+}
+
+function buildCardMessage(text: string, card: ChatCardData, mood: MoodState = "Neutral"): ChatMessage {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role: "assistant",
+    text,
+    mood,
+    timestamp: new Intl.DateTimeFormat("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date()),
+    card,
+  };
+}
 
 type ContactFlowType = Exclude<AlertAction, "continue">;
 
@@ -155,6 +207,13 @@ const contactOptions: Record<ContactFlowType, string[]> = {
 const welcomeText =
   "Welcome to Zhideyling AI. Try a daily check-in button or type how you're feeling, and I'll respond in a tone that matches the mood.";
 
+const starterPrompts: { label: string; text: string }[] = [
+  { label: "I'm feeling stressed about school", text: "I'm feeling stressed about school." },
+  { label: "Had a really good day", text: "Had a really good day today." },
+  { label: "I just need to vent", text: "I just need to vent for a bit." },
+  { label: "Feeling kinda down", text: "I'm feeling kinda down today." },
+];
+
 const initialMessages: ChatMessage[] = [
   {
     id: "welcome-message",
@@ -257,6 +316,7 @@ function TypingIndicator() {
 export default function Chat({
   onMoodUpdate,
   onSosClick,
+  onOpenBreathing,
   supportShortcut = null,
 }: ChatProps) {
   const [isConversationRailOpen, setIsConversationRailOpen] = useState(false);
@@ -531,6 +591,7 @@ export default function Chat({
     }
 
     const analysis = analyzeMood(text);
+    const shouldOfferSadFlow = analysis.mood === "Sad";
 
     updateConversationMessages(targetConversationId, (currentMessages) => [
       ...currentMessages,
@@ -548,10 +609,142 @@ export default function Chat({
       ]);
       if (analysis.needsAlert) {
         setIsAlertOpen(true);
+      } else if (shouldOfferSadFlow) {
+        scheduleTimeout(() => {
+          updateConversationMessages(targetConversationId, (currentMessages) => [
+            ...currentMessages,
+            buildCardMessage(
+              "If it feels right, want to try something small to shift the mood a bit?",
+              { kind: "sad-offer" },
+              "Sad"
+            ),
+          ]);
+          focusComposer();
+        }, 700);
       } else {
         focusComposer();
       }
     }, 1400);
+  }
+
+  function updateCardInMessage(
+    messageId: string,
+    updater: (card: ChatCardData) => ChatCardData
+  ) {
+    updateConversationMessages(selectedConversationId, (currentMessages) =>
+      currentMessages.map((message) =>
+        message.id === messageId && message.card
+          ? { ...message, card: updater(message.card) }
+          : message
+      )
+    );
+  }
+
+  function appendAssistantText(text: string, mood: MoodState = "Neutral") {
+    updateConversationMessages(selectedConversationId, (currentMessages) => [
+      ...currentMessages,
+      buildMessage("assistant", text, mood),
+    ]);
+  }
+
+  function appendCard(text: string, card: ChatCardData, mood: MoodState = "Neutral") {
+    updateConversationMessages(selectedConversationId, (currentMessages) => [
+      ...currentMessages,
+      buildCardMessage(text, card, mood),
+    ]);
+  }
+
+  function handleCardAction(messageId: string, action: CardAction) {
+    if (action.kind === "sad-offer") {
+      updateCardInMessage(messageId, (card) =>
+        card.kind === "sad-offer" ? { ...card, resolved: action.choice } : card
+      );
+
+      if (action.choice === "chat") {
+        scheduleTimeout(() => {
+          appendAssistantText("Okay — I'm right here whenever you're ready.", "Sad");
+          focusComposer();
+        }, 500);
+        return;
+      }
+
+      if (action.choice === "game") {
+        scheduleTimeout(() => {
+          appendCard("Pick one and we'll go.", { kind: "game-pick" }, "Neutral");
+        }, 500);
+        return;
+      }
+
+      if (action.choice === "exercise") {
+        scheduleTimeout(() => {
+          appendCard("Which one feels right?", { kind: "exercise-pick" }, "Neutral");
+        }, 500);
+      }
+      return;
+    }
+
+    if (action.kind === "game-pick") {
+      updateCardInMessage(messageId, (card) =>
+        card.kind === "game-pick" ? { ...card, resolved: action.choice } : card
+      );
+
+      if (action.choice === "emoji") {
+        scheduleTimeout(() => {
+          appendCard("Here's one — what do you think?", makeEmojiGuessCard(), "Neutral");
+        }, 500);
+      } else {
+        const prompt = wyrPrompts[Math.floor(Math.random() * wyrPrompts.length)];
+        scheduleTimeout(() => {
+          appendCard("Okay — pick one:", { kind: "wyr", prompt }, "Neutral");
+        }, 500);
+      }
+      return;
+    }
+
+    if (action.kind === "exercise-pick") {
+      updateCardInMessage(messageId, (card) =>
+        card.kind === "exercise-pick" ? { ...card, resolved: action.choice } : card
+      );
+
+      if (action.choice === "breathing") {
+        scheduleTimeout(() => {
+          onOpenBreathing();
+        }, 300);
+      } else {
+        scheduleTimeout(() => {
+          appendAssistantText(
+            "Let's do 5-4-3-2-1 grounding. Slowly, in your own time: name 5 things you can see, 4 things you can touch, 3 you can hear, 2 you can smell, and 1 you can taste. Type as you go — I'll wait.",
+            "Neutral"
+          );
+          focusComposer();
+        }, 500);
+      }
+      return;
+    }
+
+    if (action.kind === "emoji-guess") {
+      updateCardInMessage(messageId, (card) =>
+        card.kind === "emoji-guess"
+          ? { ...card, userIndex: action.index }
+          : card
+      );
+      return;
+    }
+
+    if (action.kind === "wyr") {
+      updateCardInMessage(messageId, (card) =>
+        card.kind === "wyr" ? { ...card, userPick: action.choice } : card
+      );
+      scheduleTimeout(() => {
+        appendAssistantText(
+          action.choice === "a"
+            ? "Bold pick — I'd probably go there too 🙂"
+            : "Yeah, that one's fun. Nice choice.",
+          "Happy"
+        );
+      }, 600);
+      return;
+    }
   }
 
   function handleAlertSelection(action: AlertAction) {
@@ -781,15 +974,57 @@ export default function Chat({
           <div
             className={`mx-auto flex w-full max-w-3xl flex-col gap-4 pt-1 ${
               isFreshChat
-                ? "min-h-full justify-end pb-14 sm:pb-16"
+                ? "min-h-full justify-center pb-14 sm:pb-16"
                 : "pb-24 sm:pb-28"
             }`}
           >
-            {messages.map((message) => (
-              <Message key={message.id} message={message} />
-            ))}
-            {isTyping && <TypingIndicator />}
-            <div ref={conversationEndRef} />
+            {isFreshChat ? (
+              <div className="flex flex-col items-center gap-6 text-center">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-quiet">
+                    Zhideyling AI
+                  </p>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-body sm:text-3xl">
+                    Hello Talop, how are you?
+                  </h2>
+                  <p className="mt-2 text-sm text-quiet">
+                    Tap a prompt to start, or type anything you want to share.
+                  </p>
+                </div>
+                <div className="grid w-full max-w-xl gap-3 sm:grid-cols-2">
+                  {starterPrompts.map((prompt) => (
+                    <button
+                      key={prompt.label}
+                      type="button"
+                      onClick={() => sendMessage(prompt.text)}
+                      className="rounded-[22px] border border-primary/15 bg-white/80 px-4 py-3 text-left text-sm font-medium text-body shadow-[0_8px_20px_rgba(15,23,42,0.05)] transition hover:border-primary/35 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+                    >
+                      {prompt.label}
+                    </button>
+                  ))}
+                </div>
+                <div ref={conversationEndRef} />
+              </div>
+            ) : (
+              <>
+                {messages.map((message) => (
+                  <Fragment key={message.id}>
+                    <Message message={message} />
+                    {message.card ? (
+                      <div className="flex w-full justify-start">
+                        <ChatCard
+                          messageId={message.id}
+                          card={message.card}
+                          onAction={handleCardAction}
+                        />
+                      </div>
+                    ) : null}
+                  </Fragment>
+                ))}
+                {isTyping && <TypingIndicator />}
+                <div ref={conversationEndRef} />
+              </>
+            )}
           </div>
         </div>
 
