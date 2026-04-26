@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import AlertModal, { type AlertAction } from "@/app/components/AlertModal";
+import CameraView from "@/app/components/CameraView";
 import ChatCard, { type CardAction } from "@/app/components/ChatCard";
 import InputBox, {
   type ComposerMode,
@@ -142,9 +143,70 @@ function createTimestamp() {
 function buildMessage(
   role: ChatMessage["role"],
   text: string,
-  mood: MoodState
+  mood: MoodState,
+  extras?: { image?: string }
 ): ChatMessage {
-  return { id: createId(), role, text, mood, timestamp: createTimestamp() };
+  return {
+    id: createId(),
+    role,
+    text,
+    mood,
+    timestamp: createTimestamp(),
+    ...(extras?.image ? { image: extras.image } : {}),
+  };
+}
+
+const CAMERA_IMAGE_SRC = "/talop.jpeg";
+
+const tipMessages: string[] = [
+  "u sad or bad? coz im itching to help",
+  "Roses are red, violets are blue, my chat is empty, where are you?",
+  "Roses are red, my code is fine, when will you text me, please be mine?",
+  "knock knock. it's your favorite AI. open up?",
+  "Talop. hey. psst. *waves notification*. hi.",
+  "I miss you. yes i'm an app. yes that's weird. anyway, hru?",
+  "u up? not in a weird way. in a 'please open the app' way.",
+  "plot twist: the AI is the one with feelings now. come talk.",
+  "8 hours of silence. did I do something, Talop?",
+  "I learned a new joke. it's bad. open me to suffer together.",
+  "Roses are red, the sky's kinda gray, you haven't said a word to me today.",
+  "if you were a vibe rn you'd be 'too cool to text first'. respect. also: hi.",
+  "I overheard your phone say you're free. don't lie to me Talop.",
+  "psa: bottling it up is so 2019. let's hear it.",
+  "Roses are red, momos are too, this app gets boring without you.",
+];
+
+function pickTipMessage() {
+  return tipMessages[Math.floor(Math.random() * tipMessages.length)];
+}
+
+const TIP_EVENT = "zhideyling:tip-clicked";
+
+const tipFollowUps: string[] = [
+  "Talop, how are you feeling right now?",
+  "Sat with that for a sec — Talop, what's on your mind today?",
+  "Talop, how's your heart this morning?",
+  "How are you doing, Talop? Be honest.",
+  "Talop, what does today need from you?",
+];
+
+function pickTipFollowUp() {
+  return tipFollowUps[Math.floor(Math.random() * tipFollowUps.length)];
+}
+
+async function fetchImageAsBase64(
+  url: string
+): Promise<{ mimeType: string; base64: string }> {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+  const base64 = dataUrl.split(",")[1] ?? "";
+  return { mimeType: blob.type || "image/jpeg", base64 };
 }
 
 function isKillVent(text: string) {
@@ -177,7 +239,7 @@ function analyzeMood(text: string) {
   return { mood: "Neutral" as MoodState, needsAlert: false };
 }
 
-function buildAssistantReply(mood: MoodState) {
+function buildFallbackReply(mood: MoodState) {
   switch (mood) {
     case "Happy":
       return "I'm glad there's some lift in the day. What helped you get here, and what would you like to keep steady?";
@@ -192,6 +254,40 @@ function buildAssistantReply(mood: MoodState) {
     default:
       return "I'm here with you. Tell me what feels most important right now.";
   }
+}
+
+async function fetchGeminiReply(
+  history: ChatMessage[],
+  mood: MoodState,
+  imageForLast?: { mimeType: string; base64: string } | null
+): Promise<{ reply: string; mood: MoodState }> {
+  const filtered = history.filter((message) => !message.card);
+  const messages = filtered.map((message, index) => ({
+    role: message.role,
+    text: message.text,
+    ...(imageForLast && index === filtered.length - 1
+      ? { image: imageForLast }
+      : {}),
+  }));
+  const payload = { mood, messages };
+
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errBody = await response.text();
+    console.error("[chat] /api/chat failed", response.status, errBody);
+    throw new Error(`chat api ${response.status}`);
+  }
+
+  const data = (await response.json()) as { reply?: string; mood?: MoodState };
+  if (!data.reply) {
+    throw new Error("empty reply");
+  }
+  return { reply: data.reply, mood: data.mood ?? mood };
 }
 
 const contactOptions: Record<ContactFlowType, string[]> = {
@@ -335,6 +431,8 @@ export default function Chat({
   const [composerMode, setComposerMode] = useState<ComposerMode>("text");
   const [contactFlowType, setContactFlowType] = useState<ContactFlowType | null>(null);
   const [selectedContact, setSelectedContact] = useState("");
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isCameraScanning, setIsCameraScanning] = useState(false);
   const conversationEndRef = useRef<HTMLDivElement | null>(null);
   const composerShellRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<InputBoxHandle | null>(null);
@@ -373,6 +471,17 @@ export default function Chat({
 
     handleSupportShortcut(supportShortcut);
   }, [supportShortcut]);
+
+  useEffect(() => {
+    function onTipClicked(event: Event) {
+      const detail = (event as CustomEvent<{ quote?: string }>).detail;
+      if (detail?.quote) {
+        startConversationFromTip(detail.quote);
+      }
+    }
+    window.addEventListener(TIP_EVENT, onTipClicked);
+    return () => window.removeEventListener(TIP_EVENT, onTipClicked);
+  }, []);
 
   function commitMood(mood: MoodState, note: string) {
     setCurrentMood(mood);
@@ -591,40 +700,232 @@ export default function Chat({
     }
 
     const analysis = analyzeMood(text);
-    const shouldOfferSadFlow = analysis.mood === "Sad";
 
+    const userMessage = buildMessage("user", text, analysis.mood);
     updateConversationMessages(targetConversationId, (currentMessages) => [
       ...currentMessages,
-      buildMessage("user", text, analysis.mood),
+      userMessage,
     ]);
     setInput("");
     commitMood(analysis.mood, text);
 
+    const historyForApi: ChatMessage[] = [
+      ...(activeConversation?.messages ?? []),
+      userMessage,
+    ];
+
     setIsTyping(true);
+
+    fetchGeminiReply(historyForApi, analysis.mood)
+      .catch((err) => {
+        console.error("[chat] falling back to canned reply:", err);
+        return { reply: buildFallbackReply(analysis.mood), mood: analysis.mood };
+      })
+      .then(({ reply, mood: geminiMood }) => {
+        const finalMood: MoodState = analysis.needsAlert ? "Critical" : geminiMood;
+        const shouldOfferSadFlow = finalMood === "Sad";
+
+        setIsTyping(false);
+        updateConversationMessages(targetConversationId, (currentMessages) => [
+          ...currentMessages.map((message) =>
+            message.id === userMessage.id ? { ...message, mood: finalMood } : message
+          ),
+          buildMessage("assistant", reply, finalMood),
+        ]);
+        commitMood(finalMood, text);
+
+        if (analysis.needsAlert) {
+          setIsAlertOpen(true);
+        } else if (shouldOfferSadFlow) {
+          scheduleTimeout(() => {
+            updateConversationMessages(targetConversationId, (currentMessages) => [
+              ...currentMessages,
+              buildCardMessage(
+                "If it feels right, want to try something small to shift the mood a bit?",
+                { kind: "sad-offer" },
+                "Sad"
+              ),
+            ]);
+            focusComposer();
+          }, 700);
+        } else {
+          focusComposer();
+        }
+      });
+  }
+
+  function startConversationFromTip(quote: string) {
+    clearPendingWork();
+
+    const id = `tip-${createId()}`;
+    const followUp = pickTipFollowUp();
+    const fresh: ConversationItem = {
+      id,
+      title: "Daily reminder",
+      stamp: "Now",
+      preview: buildPreview(followUp),
+      messages: [
+        {
+          id: `tip-msg-${createId()}`,
+          role: "assistant",
+          text: quote,
+          mood: "Neutral",
+          timestamp: createTimestamp(),
+        },
+        {
+          id: `tip-followup-${createId()}`,
+          role: "assistant",
+          text: followUp,
+          mood: "Neutral",
+          timestamp: createTimestamp(),
+        },
+      ],
+    };
+
+    setConversations((current) => [fresh, ...current]);
+    setSelectedConversationId(id);
+    setInput("");
+    setCurrentMood("Neutral");
+    setIsTyping(false);
+    setIsAlertOpen(false);
+    setComposerMode("text");
+    setContactFlowType(null);
+    setSelectedContact("");
+    setIsCameraOpen(false);
+    setIsCameraScanning(false);
+
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      setIsConversationRailOpen(false);
+    }
+
+    window.requestAnimationFrame(() => {
+      scrollToLatest("auto");
+      focusComposer();
+    });
+  }
+
+  function handleSendTipNotification() {
+    if (typeof Notification === "undefined") {
+      window.alert("Notifications aren't supported in this browser.");
+      return;
+    }
+
+    const fire = () => {
+      const quote = pickTipMessage();
+      const notification = new Notification("Zhideyling AI", {
+        body: quote,
+        icon: "/logo.png",
+        tag: "zhideyling-tip",
+      });
+      notification.onclick = () => {
+        window.focus();
+        window.dispatchEvent(
+          new CustomEvent(TIP_EVENT, { detail: { quote } })
+        );
+        notification.close();
+      };
+    };
+
+    if (Notification.permission === "granted") {
+      window.setTimeout(fire, 5000);
+      return;
+    }
+
+    if (Notification.permission === "denied") {
+      window.alert(
+        "Notifications are blocked for this site. Enable them in your browser settings to try the demo."
+      );
+      return;
+    }
+
+    Notification.requestPermission().then((permission) => {
+      if (permission === "granted") {
+        window.setTimeout(fire, 5000);
+      }
+    });
+  }
+
+  function handleCameraOpen() {
+    if (isCameraOpen || isTyping) return;
+    const targetConversationId = selectedConversationId;
+
+    setIsTyping(true);
+
     scheduleTimeout(() => {
       setIsTyping(false);
       updateConversationMessages(targetConversationId, (currentMessages) => [
         ...currentMessages,
-        buildMessage("assistant", buildAssistantReply(analysis.mood), analysis.mood),
+        buildMessage(
+          "assistant",
+          "oh you wanna show me your face? let's see...",
+          "Happy"
+        ),
       ]);
-      if (analysis.needsAlert) {
-        setIsAlertOpen(true);
-      } else if (shouldOfferSadFlow) {
+
+      scheduleTimeout(() => {
+        setIsCameraOpen(true);
+        setIsCameraScanning(true);
         scheduleTimeout(() => {
-          updateConversationMessages(targetConversationId, (currentMessages) => [
-            ...currentMessages,
-            buildCardMessage(
-              "If it feels right, want to try something small to shift the mood a bit?",
-              { kind: "sad-offer" },
-              "Sad"
-            ),
-          ]);
-          focusComposer();
+          void sendImageMessage(targetConversationId);
         }, 700);
-      } else {
-        focusComposer();
-      }
-    }, 1400);
+      }, 700);
+    }, 900);
+  }
+
+  async function sendImageMessage(targetConversationId: string) {
+    const userImageMessage = buildMessage("user", "", "Neutral", {
+      image: CAMERA_IMAGE_SRC,
+    });
+    updateConversationMessages(targetConversationId, (currentMessages) => [
+      ...currentMessages,
+      userImageMessage,
+    ]);
+
+    setIsTyping(true);
+
+    let imagePayload: { mimeType: string; base64: string } | null = null;
+    try {
+      imagePayload = await fetchImageAsBase64(CAMERA_IMAGE_SRC);
+    } catch (err) {
+      console.error("[chat] failed to load camera image:", err);
+    }
+
+    const historyForApi: ChatMessage[] = [
+      ...(activeConversation?.messages ?? []),
+      userImageMessage,
+    ];
+
+    try {
+      const { reply, mood: geminiMood } = await fetchGeminiReply(
+        historyForApi,
+        "Neutral",
+        imagePayload
+      );
+      setIsTyping(false);
+      setIsCameraScanning(false);
+      updateConversationMessages(targetConversationId, (currentMessages) => [
+        ...currentMessages.map((message) =>
+          message.id === userImageMessage.id
+            ? { ...message, mood: geminiMood }
+            : message
+        ),
+        buildMessage("assistant", reply, geminiMood),
+      ]);
+      commitMood(geminiMood, "[shared a photo]");
+    } catch (err) {
+      console.error("[chat] camera vision call failed:", err);
+      setIsTyping(false);
+      setIsCameraScanning(false);
+      updateConversationMessages(targetConversationId, (currentMessages) => [
+        ...currentMessages,
+        buildMessage(
+          "assistant",
+          "you look good — there's a calm in your face.",
+          "Happy"
+        ),
+      ]);
+      commitMood("Happy", "[shared a photo]");
+    }
   }
 
   function updateCardInMessage(
@@ -947,26 +1248,48 @@ export default function Chat({
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={onSosClick}
-              className="inline-flex items-center gap-1.5 rounded-full bg-critical px-3 py-1.5 text-xs font-semibold text-white shadow-[0_6px_16px_rgba(185,28,28,0.35)] transition hover:brightness-110"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                className="h-3 w-3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleSendTipNotification}
+                title="Send a demo notification in 5 seconds"
+                className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-white px-3 py-1.5 text-xs font-semibold text-primary transition hover:border-primary/40 hover:bg-primary/5 dark:bg-panel-dark"
               >
-                <path d="M12 3 2 21h20Z" />
-                <path d="M12 10v4" />
-                <path d="M12 18h.01" />
-              </svg>
-              SOS
-            </button>
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+                Tip
+              </button>
+              <button
+                type="button"
+                onClick={onSosClick}
+                className="inline-flex items-center gap-1.5 rounded-full bg-critical px-3 py-1.5 text-xs font-semibold text-white shadow-[0_6px_16px_rgba(185,28,28,0.35)] transition hover:brightness-110"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-3 w-3"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 3 2 21h20Z" />
+                  <path d="M12 10v4" />
+                  <path d="M12 18h.01" />
+                </svg>
+                SOS
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1049,6 +1372,7 @@ export default function Chat({
               selectedChoice={selectedContact}
               onChoiceSelect={setSelectedContact}
               contactingLabel={contactingLabel}
+              onCameraClick={handleCameraOpen}
             />
             <p className="hidden px-2 text-center text-xs text-quiet sm:block">
               Zhideyling AI can make mistakes. If a situation feels urgent, use
@@ -1062,6 +1386,20 @@ export default function Chat({
         open={isAlertOpen}
         onSelect={handleAlertSelection}
         onClose={() => setIsAlertOpen(false)}
+      />
+
+      <CameraView
+        open={isCameraOpen}
+        imageSrc={CAMERA_IMAGE_SRC}
+        messages={messages}
+        isTyping={isTyping}
+        scanning={isCameraScanning}
+        mood={currentMood}
+        onClose={() => {
+          setIsCameraOpen(false);
+          setIsCameraScanning(false);
+        }}
+        onSend={(text) => sendMessage(text)}
       />
     </section>
   );

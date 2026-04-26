@@ -22,6 +22,7 @@ type InputBoxProps = {
   selectedChoice?: string;
   onChoiceSelect?: (value: string) => void;
   contactingLabel?: string;
+  onCameraClick?: () => void;
 };
 
 export type InputBoxHandle = {
@@ -40,6 +41,7 @@ const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox(
     selectedChoice = "",
     onChoiceSelect,
     contactingLabel = "",
+    onCameraClick,
   },
   ref
 ) {
@@ -103,13 +105,37 @@ const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(function InputBox(
             <p className="hidden text-xs leading-5 text-quiet sm:block">
               Enter to send. Shift + Enter for a new line.
             </p>
-            <button
-              type="submit"
-              disabled={disabled || !value.trim()}
-              className="rounded-full bg-primary px-3.5 py-1 text-xs font-semibold text-white transition hover:bg-text disabled:opacity-50 sm:text-sm"
-            >
-              Send
-            </button>
+            <div className="flex items-center gap-2">
+              {onCameraClick ? (
+                <button
+                  type="button"
+                  onClick={onCameraClick}
+                  disabled={disabled}
+                  aria-label="Open camera"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-primary/15 bg-white text-primary transition hover:border-primary/35 hover:bg-primary/5 disabled:opacity-50 dark:bg-panel-dark"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </button>
+              ) : null}
+              <button
+                type="submit"
+                disabled={disabled || !value.trim()}
+                className="rounded-full bg-primary px-3.5 py-1 text-xs font-semibold text-white transition hover:bg-text disabled:opacity-50 sm:text-sm"
+              >
+                Send
+              </button>
+            </div>
           </div>
         </>
       ) : null}

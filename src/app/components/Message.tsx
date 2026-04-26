@@ -24,6 +24,7 @@ export type ChatMessage = {
   mood: MoodState;
   timestamp: string;
   card?: ChatCardData;
+  image?: string;
 };
 
 export const moodStyles: Record<
@@ -88,7 +89,17 @@ export default function Message({ message }: MessageProps) {
             </span>
           ) : null}
         </div>
-        <p className="mt-2.5 text-sm leading-7 sm:text-[15px]">{message.text}</p>
+        {message.image ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={message.image}
+            alt="Shared from camera"
+            className="mt-2.5 max-h-72 w-full rounded-[16px] object-cover"
+          />
+        ) : null}
+        {message.text ? (
+          <p className="mt-2.5 text-sm leading-7 sm:text-[15px]">{message.text}</p>
+        ) : null}
         <p
           className={`mt-2.5 text-xs ${
             isUser ? "text-white/70" : "text-muted dark:text-muted-dark"
